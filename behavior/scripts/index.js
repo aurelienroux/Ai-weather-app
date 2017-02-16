@@ -1,7 +1,8 @@
 'use strict'
 
-exports.handle = (client) => {
-  // Create steps
+const getCurrentWeather = require('./lib/getCurrentWeather')
+
+exports.handle = function handle(client) {
   const sayHello = client.createStep({
     satisfied() {
       return Boolean(client.getConversationState().helloSent)
@@ -13,11 +14,9 @@ exports.handle = (client) => {
         documentation_link: 'http://docs.init.ai',
       })
       client.addResponse('provide/instructions')
-
       client.updateConversationState({
         helloSent: true
       })
-
       client.done()
     }
   })
@@ -27,7 +26,11 @@ exports.handle = (client) => {
       return false
     },
 
-
+    prompt() {
+      client.addResponse('apology/untrained')
+      client.done()
+    }
+  })
 
   const collectCity = client.createStep({
     satisfied() {
@@ -35,13 +38,11 @@ exports.handle = (client) => {
     },
 
     extractInfo() {
-      const city = client.getFirstEntityWithRole(client.getMessagePart(), 'city')
-
+     const city = client.getFirstEntityWithRole(client.getMessagePart(), 'city')
       if (city) {
         client.updateConversationState({
           weatherCity: city,
         })
-
         console.log('User wants the weather in:', city.value)
       }
     },
@@ -52,29 +53,38 @@ exports.handle = (client) => {
     },
   })
 
-
-
   const provideWeather = client.createStep({
     satisfied() {
       return false
     },
 
-    prompt() {
-      let weatherData = {
-        temperature: 60,
-        condition: 'sunny',
-        city: client.getConversationState().weatherCity.value,
-      }
+    prompt(callback) {
+      getCurrentWeather(client.getConversationState().weatherCity.value, resultBody => {
+        if (!resultBody || resultBody.cod !== 200) {
+          console.log('Error getting weather.')
+          callback()
+          return
+        }
 
-      client.addResponse('provide_weather/current', weatherData)
-      client.done()
-    }
-  })
+        const weatherDescription = (
+          resultBody.weather.length > 0 ?
+          resultBody.weather[0].description :
+          null
+        )
 
-    prompt() {
-      client.addResponse('apology/untrained')
-      client.done()
-    }
+        const weatherData = {
+          temperature: resultBody.main.temp,
+          condition: weatherDescription,
+          city: resultBody.name,
+        }
+
+        console.log('sending real weather:', weatherData)
+        client.addResponse('provide_weather/current', weatherData)
+        client.done()
+
+        callback()
+      })
+    },
   })
 
   client.runFlow({
@@ -83,6 +93,6 @@ exports.handle = (client) => {
       main: 'getWeather',
       hi: [sayHello],
       getWeather: [collectCity, provideWeather],
-    },
+    }
   })
 }
